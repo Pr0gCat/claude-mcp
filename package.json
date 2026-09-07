@@ -1,0 +1,38 @@
+{
+  "name": "claude-code-subagent-mcp",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "os": ["win32"],
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "claude-subagent-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "docs/security.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "npm run build",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "smoke:claude": "vitest run test/claude-real-smoke.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "better-sqlite3": "^13.0.3",
+    "node-pty": "1.1.0",
+    "zod": "4.5.4"
+  }
+}
