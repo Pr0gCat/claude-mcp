@@ -42,6 +42,14 @@ Claude Code CLI processes (four at once by default, configurable)
   `claude --version` and refuses to spawn agents against anything older than
   2.1.238.
 
+## Orphan process containment (0.1.0-macos.5)
+
+On macOS, every spawned Claude process group now has a detached native
+watchdog. The watchdog verifies both parent and child identities using their
+PID and exact creation time. If the MCP server disappears before graceful
+shutdown finishes, it kills the matching Claude process group so a detached
+child cannot retain a process lease or workspace lock indefinitely.
+
 ## Queue scheduling fix (0.1.0-macos.4)
 
 The scheduler skips queued agents whose workspace lock currently conflicts and

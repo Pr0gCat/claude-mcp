@@ -5,7 +5,11 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import * as nodePty from 'node-pty';
 
-import { inspectMacProcessIdentity, macProcessStartedAt } from '../mac-process.js';
+import {
+  inspectMacProcessIdentity,
+  macProcessStartedAt,
+  startMacProcessWatchdog,
+} from '../mac-process.js';
 
 import { JsonLineDecoder } from './protocol.js';
 
@@ -379,6 +383,9 @@ export class ClaudeRunner {
     try {
       child.attach();
       startedAt = (options.processStartedAt ?? processStartedAt)(child.pid);
+      if (process.platform === 'darwin') {
+        await startMacProcessWatchdog({ pid: child.pid, startedAt });
+      }
       return new ClaudeRunner(child, { ...options, startedAt });
     } catch (error) {
       const cleanup = new ClaudeRunner(child, {

@@ -1,4 +1,5 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
 import type { ProcessIdentity, ProcessIdentityInspection } from './claude/runner.js';
 
@@ -29,4 +30,20 @@ export function inspectMacProcessIdentity(identity: ProcessIdentity): ProcessIde
   } catch {
     return 'unknown';
   }
+}
+
+export async function startMacProcessWatchdog(identity: ProcessIdentity): Promise<void> {
+  const parent = { pid: process.pid, startedAt: macProcessStartedAt(process.pid) };
+  const watchdog = spawn(helper, [
+    '--watch-parent',
+    String(parent.pid),
+    parent.startedAt,
+    String(identity.pid),
+    identity.startedAt,
+  ], { detached: true, stdio: 'ignore' });
+  await Promise.race([
+    once(watchdog, 'spawn'),
+    once(watchdog, 'error').then(([error]) => Promise.reject(error)),
+  ]);
+  watchdog.unref();
 }

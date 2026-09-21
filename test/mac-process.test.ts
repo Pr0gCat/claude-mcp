@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { ClaudeRunner } from '../src/claude/runner.js';
 import { inspectMacProcessIdentity, macProcessStartedAt } from '../src/mac-process.js';
@@ -51,6 +52,39 @@ describe.runIf(process.platform === 'darwin')('macOS process lifecycle', () => {
     } finally {
       if (!runner.exited) await runner.interrupt(0);
       if (descendantPid) { try { process.kill(descendantPid, 'SIGKILL'); } catch {} }
+    }
+  }, 10_000);
+
+  it('kills the Claude process group when its MCP parent disappears', async () => {
+    const moduleUrl = pathToFileURL(fileURLToPath(new URL('../dist/mac-process.js', import.meta.url))).href;
+    const supervisorCode = `
+      const {spawn}=require('node:child_process');
+      (async()=>{
+        const api=await import(${JSON.stringify(moduleUrl)});
+        const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{
+          detached:true,stdio:'ignore'
+        });
+        const identity={pid:child.pid,startedAt:api.macProcessStartedAt(child.pid)};
+        await api.startMacProcessWatchdog(identity);
+        console.log(JSON.stringify(identity));
+        setInterval(()=>{},1000);
+      })().catch(error=>{console.error(error);process.exit(1)});
+    `;
+    const supervisor = spawn(process.execPath, ['-e', supervisorCode], {
+      stdio: ['ignore', 'pipe', 'inherit'],
+    });
+    supervisor.stdout.setEncoding('utf8');
+    const [line] = await once(supervisor.stdout, 'data') as [string];
+    const identity = JSON.parse(line) as { pid: number; startedAt: string };
+    try {
+      expect(inspectMacProcessIdentity(identity)).toBe('matching');
+      supervisor.kill('SIGKILL');
+      await once(supervisor, 'exit');
+      await expect.poll(() => inspectMacProcessIdentity(identity), { timeout: 5_000 })
+        .toBe('missing');
+    } finally {
+      try { process.kill(-identity.pid, 'SIGKILL'); } catch {}
+      try { supervisor.kill('SIGKILL'); } catch {}
     }
   }, 10_000);
 });
