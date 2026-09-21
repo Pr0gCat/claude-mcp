@@ -1,9 +1,12 @@
 {
   "name": "claude-code-subagent-mcp",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.0-macos.4",
   "type": "module",
-  "os": ["win32"],
+  "os": [
+    "win32",
+    "darwin"
+  ],
   "engines": {
     "node": ">=22"
   },
@@ -16,12 +19,13 @@
     "docs/security.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node scripts/build-native.mjs",
     "prepack": "npm run build",
     "start": "node dist/index.js",
-    "test": "vitest run",
-    "smoke:claude": "vitest run test/claude-real-smoke.test.ts",
-    "typecheck": "tsc --noEmit"
+    "test": "vitest run --configLoader runner",
+    "smoke:claude": "node scripts/smoke-claude.mjs",
+    "typecheck": "tsc --noEmit",
+    "pretest": "npm run build"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",

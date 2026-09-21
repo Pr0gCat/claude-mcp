@@ -137,6 +137,11 @@ function readOutput(page: AgentReadPage): Record<string, unknown> {
   return {
     agent: summaryOutput(page.agent),
     turns: page.turns.map(turnOutput),
+    ...(page.latestResult ? { latest_result: {
+      turn_id: page.latestResult.turnId,
+      created_at: page.latestResult.createdAt,
+      payload: page.latestResult.payload,
+    } } : {}),
     events: page.events.map(eventOutput),
     cursor: page.cursor,
     has_more: page.hasMore,
@@ -284,7 +289,7 @@ export function registerAgentTools(server: McpServer, service: AgentServiceApi):
   }, (input) => executeInput(listModelsInput.validator, input, modelCatalogOutput));
 
   server.registerTool('read_agent', {
-    description: 'Read persisted semantic events and turn outcomes for an agent.',
+    description: 'Read agent status and latest_result.payload.result (the latest reply or API error). latest_result is included without include_raw. Check is_error and terminal_reason; succeeded alone does not prove files changed. Raw history is optional and paginated.',
     inputSchema: readAgentInput.inputSchema,
   }, (input) => executeInput(readAgentInput.validator, input, (input) => readOutput(service.readAgent(
     input.agent_id,

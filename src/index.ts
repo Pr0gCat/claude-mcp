@@ -25,7 +25,7 @@ async function main(): Promise<void> {
     onDiagnostic: (agentId) => console.error(`Claude runtime diagnostic for agent ${agentId}`),
     onProcessExit: (agentId) => console.error(`Claude runtime process exited for agent ${agentId}`),
   });
-  scheduler = new Scheduler(store, runtime, { serverId });
+  scheduler = new Scheduler(store, runtime, { serverId, processLimit: config.processLimit });
   const service = new AgentService(store, scheduler, new EventWaiter(store), {
     stallTimeoutMs: config.stallTimeoutMs,
   });

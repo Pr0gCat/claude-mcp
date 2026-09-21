@@ -151,7 +151,7 @@ describe('Scheduler', () => {
     expect(runtime.starts).toEqual(agents.slice(0, 4).map((agent) => agent.id));
   });
 
-  it('does not allow configuration to raise the hard four-process limit', async () => {
+  it('allows configuration to raise the process limit', async () => {
     const store = openStore(temporaryDatabase());
     stores.push(store);
     const runtime = new RecordingRuntime();
@@ -164,7 +164,7 @@ describe('Scheduler', () => {
     for (const agent of agents) scheduler.enqueue(agent.id);
     await scheduler.drain();
 
-    expect(runtime.starts).toHaveLength(4);
+    expect(runtime.starts).toHaveLength(5);
   });
 
   it('enforces the four-process limit across scheduler instances', async () => {

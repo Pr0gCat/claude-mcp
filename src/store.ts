@@ -1252,6 +1252,19 @@ export class AgentStore {
     return rows.map(asClaudeEvent);
   }
 
+  readLatestResult(agentId: string): ClaudeEvent | undefined {
+    const row = this.#database.prepare(`
+      SELECT sequence, agent_id, turn_id, type, payload, raw, created_at
+      FROM claude_events
+      WHERE agent_id = ? AND type = 'result'
+        AND NOT (json_extract(payload, '$.num_turns') IS 0
+          AND json_extract(payload, '$.is_error') IS NOT 1
+          AND COALESCE(json_extract(payload, '$.result'), '') = '')
+      ORDER BY sequence DESC LIMIT 1
+    `).get(agentId) as ClaudeEventRow | undefined;
+    return row ? asClaudeEvent(row) : undefined;
+  }
+
   latestClaudeCursor(agentId: string): string {
     const row = this.#database.prepare(`
       SELECT max(sequence) AS sequence FROM claude_events WHERE agent_id = ?
@@ -1291,6 +1304,12 @@ export class AgentStore {
       const scheduled = this.#database.prepare(`
         SELECT q.agent_id, q.workspace_key, q.lock_mode
         FROM scheduler_queue q
+        WHERE NOT EXISTS (
+          SELECT 1
+          FROM workspace_locks l
+          WHERE l.workspace_key = q.workspace_key
+            AND (q.lock_mode = 'writer' OR l.lock_mode = 'writer')
+        )
         ORDER BY q.sequence ASC
         LIMIT 1
       `).get() as { agent_id: string; workspace_key: string; lock_mode: WorkspaceLockMode } | undefined;
@@ -1302,16 +1321,6 @@ export class AgentStore {
       const leaseCount = this.#database.prepare(`SELECT count(*) AS count FROM process_leases`)
         .get() as { count: bigint };
       if (leaseCount.count >= BigInt(processLimit)) {
-        this.#database.exec('COMMIT');
-        return undefined;
-      }
-      const conflict = this.#database.prepare(`
-        SELECT 1
-        FROM workspace_locks
-        WHERE workspace_key = ? AND (? = 'writer' OR lock_mode = 'writer')
-        LIMIT 1
-      `).get(scheduled.workspace_key, scheduled.lock_mode);
-      if (conflict) {
         this.#database.exec('COMMIT');
         return undefined;
       }

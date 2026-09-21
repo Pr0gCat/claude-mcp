@@ -81,9 +81,12 @@ function eventType(value: unknown): string {
 }
 
 function resultSucceeded(value: unknown): boolean {
-  return typeof value === 'object'
-    && value !== null
-    && (value as { subtype?: unknown }).subtype === 'success';
+  if (typeof value !== 'object' || value === null) return false;
+  const result = value as { subtype?: unknown; is_error?: unknown; terminal_reason?: unknown };
+  // Claude can emit subtype=success for a completed transport turn containing an API error.
+  return result.subtype === 'success'
+    && result.is_error !== true
+    && result.terminal_reason !== 'api_error';
 }
 
 function unconfirmedSpawnPid(error: unknown): number | undefined {
@@ -276,7 +279,7 @@ export class ClaudeRuntime implements AgentRuntime {
         containmentFailure = error;
       }
       throw new RuntimeProcessContainmentError(
-        'Claude process exit was not confirmed after best-effort taskkill',
+        'Claude process exit was not confirmed after best-effort process-tree termination',
         identity,
         ownershipContained,
         false,

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -108,7 +108,7 @@ describe('loadConfig', () => {
       .toThrow('CLAUDE_MCP_STATE_DIR must not be empty');
   });
 
-  it('removes pre-existing explicit allow rules and keeps only the current user', () => {
+  it.runIf(process.platform === 'win32')('removes pre-existing explicit allow rules and keeps only the current user', () => {
     const stateDir = temporaryDirectory();
     const environment = { ...process.env, CLAUDE_MCP_TEST_ACL_PATH: stateDir };
     runPowerShell(addExtraAllowRule, environment);
@@ -120,6 +120,12 @@ describe('loadConfig', () => {
       .filter(Boolean);
     const currentIdentity = runPowerShell(readCurrentIdentity, environment).trim();
     expect(rules).toEqual([`${currentIdentity}|2032127|False`]);
+  });
+
+  it.runIf(process.platform === 'darwin')('restricts state directory permissions to its owner', () => {
+    const stateDir = temporaryDirectory();
+    loadConfig({ CLAUDE_MCP_STATE_DIR: stateDir });
+    expect(statSync(stateDir).mode & 0o777).toBe(0o700);
   });
 
   it('defaults the stall timeout to 300000ms', () => {
@@ -137,5 +143,18 @@ describe('loadConfig', () => {
   it.each(['0', '-1', '1.5', 'abc', ''])('rejects an invalid stall timeout override %s', (value) => {
     expect(() => loadConfig({ USERPROFILE: temporaryDirectory(), CLAUDE_MCP_STALL_TIMEOUT_MS: value }))
       .toThrow('CLAUDE_MCP_STALL_TIMEOUT_MS must be a positive integer');
+  });
+
+  it('defaults the process limit to four and accepts a positive integer override', () => {
+    expect(loadConfig({ USERPROFILE: temporaryDirectory() }).processLimit).toBe(4);
+    expect(loadConfig({
+      USERPROFILE: temporaryDirectory(),
+      CLAUDE_MCP_PROCESS_LIMIT: '12',
+    }).processLimit).toBe(12);
+  });
+
+  it.each(['0', '-1', '1.5', 'abc', ''])('rejects an invalid process limit override %s', (value) => {
+    expect(() => loadConfig({ USERPROFILE: temporaryDirectory(), CLAUDE_MCP_PROCESS_LIMIT: value }))
+      .toThrow('CLAUDE_MCP_PROCESS_LIMIT must be a positive integer');
   });
 });

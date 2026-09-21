@@ -335,6 +335,23 @@ describe('AgentService', () => {
     }]);
   });
 
+  it('exposes the latest reply without raw history and skips context-only acknowledgements', async () => {
+    const fixture = makeService(temporaryDatabase());
+    const spawned = await fixture.service.spawnAgent({ task: 'result retrieval' });
+    const append = (payload: object) => fixture.store.appendClaudeEvent(
+      spawned.agentId, spawned.turnId, fixture.scheduler.serverId, 'result', payload, JSON.stringify(payload),
+    );
+    const reply = { type: 'result', subtype: 'success', is_error: false, result: 'Saved the file.', num_turns: 1 };
+    append(reply);
+    append({ type: 'result', subtype: 'success', is_error: false, result: '', num_turns: 0 });
+    const page = fixture.service.readAgent(spawned.agentId, '0', 1, false);
+    expect(page.latestResult?.payload).toEqual(reply);
+    expect(page.rawEvents).toBeUndefined();
+    const failure = { type: 'result', subtype: 'success', is_error: true, result: 'ECONNRESET', num_turns: 0 };
+    append(failure);
+    expect(fixture.service.readAgent(spawned.agentId, '0', 1, false).latestResult?.payload).toEqual(failure);
+  });
+
   it('reports only still-pending messages in agent summaries', async () => {
     const fixture = makeService(temporaryDatabase());
     const spawned = await fixture.service.spawnAgent({ task: 'leased initial query' });

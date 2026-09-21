@@ -5,6 +5,8 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import * as nodePty from 'node-pty';
 
+import { inspectMacProcessIdentity, macProcessStartedAt } from '../mac-process.js';
+
 import { JsonLineDecoder } from './protocol.js';
 
 const execFileAsync = promisify(execFile);
@@ -146,6 +148,7 @@ function spawnPipeProcess(
     env,
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true,
+    detached: process.platform === 'darwin',
   });
   const pendingDiagnostics: string[] = [];
   let diagnosticListener: ((data: string) => void) | undefined;
@@ -213,7 +216,7 @@ export function assertSupportedClaudeVersion(output: string): void {
 }
 
 export function resolveClaudeExecutable(
-  configuredPath = join(homedir(), '.local', 'bin', 'claude.exe'),
+  configuredPath = join(homedir(), '.local', 'bin', process.platform === 'win32' ? 'claude.exe' : 'claude'),
 ): string {
   return inspectClaudeExecutable(configuredPath).path;
 }
@@ -224,16 +227,16 @@ export interface ClaudeExecutableIdentity {
 }
 
 export function inspectClaudeExecutable(
-  configuredPath = join(homedir(), '.local', 'bin', 'claude.exe'),
+  configuredPath = join(homedir(), '.local', 'bin', process.platform === 'win32' ? 'claude.exe' : 'claude'),
 ): ClaudeExecutableIdentity {
   const executable = isAbsolute(configuredPath) ? configuredPath : resolve(configuredPath);
   accessSync(executable);
-  // shell:true so npm-installed .cmd/.bat launcher shims resolve on Windows; the
-  // executable is quoted because shell:true does not quote the command itself.
-  const output = execFileSync(`"${executable}"`, ['--version'], {
+  const useShell = process.platform === 'win32' && /\.(?:cmd|bat)$/i.test(executable);
+  const output = execFileSync(useShell ? `"${executable}"` : executable, ['--version'], {
     encoding: 'utf8',
     windowsHide: true,
-    shell: true,
+    shell: useShell,
+    timeout: 20_000,
   });
   assertSupportedClaudeVersion(output);
   const version = /(\d+\.\d+\.\d+)/.exec(output)?.[1];
@@ -251,8 +254,9 @@ export class ClaudeSpawnCleanupError extends Error {
   }
 }
 
-function windowsProcessStartedAt(pid: number): string {
-  if (process.platform !== 'win32') return new Date().toISOString();
+function processStartedAt(pid: number): string {
+  if (process.platform === 'darwin') return macProcessStartedAt(pid);
+  if (process.platform !== 'win32') throw new Error('Unsupported platform');
   const script = [
     '$process = Get-Process -Id ([int]$env:CLAUDE_MCP_PROCESS_PID) -ErrorAction Stop',
     '$process.StartTime.ToUniversalTime().ToString("o")',
@@ -272,7 +276,8 @@ function windowsProcessStartedAt(pid: number): string {
   return startedAt.toISOString();
 }
 
-function inspectWindowsProcessIdentity(identity: ProcessIdentity): ProcessIdentityInspection {
+function inspectProcessIdentity(identity: ProcessIdentity): ProcessIdentityInspection {
+  if (process.platform === 'darwin') return inspectMacProcessIdentity(identity);
   if (process.platform !== 'win32') return 'unknown';
   const script = [
     '$candidate = Get-Process -Id ([int]$env:CLAUDE_MCP_INSPECT_PID) -ErrorAction SilentlyContinue',
@@ -302,7 +307,14 @@ function inspectWindowsProcessIdentity(identity: ProcessIdentity): ProcessIdenti
   }
 }
 
-async function taskkill(executable: string, args: readonly string[]): Promise<void> {
+async function terminateProcessTree(executable: string, args: readonly string[]): Promise<void> {
+  if (process.platform === 'darwin') {
+    // Pipe children are session/group leaders (detached), so this includes descendants.
+    const pid = Number(args[1]);
+    if (!Number.isSafeInteger(pid) || pid <= 1) throw new Error('Invalid process group');
+    process.kill(-pid, 'SIGKILL');
+    return;
+  }
   await execFileAsync(executable, [...args], { windowsHide: true });
 }
 
@@ -319,8 +331,8 @@ export class ClaudeRunner {
 
   constructor(pty: ClaudePty, options: ClaudeRunnerOptions) {
     this.#pty = pty;
-    this.#killTree = options.killTree ?? taskkill;
-    this.#inspectProcessIdentity = options.inspectProcessIdentity ?? inspectWindowsProcessIdentity;
+    this.#killTree = options.killTree ?? terminateProcessTree;
+    this.#inspectProcessIdentity = options.inspectProcessIdentity ?? inspectProcessIdentity;
     this.#killConfirmationMs = options.killConfirmationMs ?? defaultKillConfirmationMs;
     assertNonNegativeInteger(this.#killConfirmationMs, 'kill confirmation window');
     this.identity = { pid: pty.pid, startedAt: options.startedAt };
@@ -350,7 +362,7 @@ export class ClaudeRunner {
     assertNonNegativeInteger(killConfirmationMs, 'kill confirmation window');
     const executable = options.executable
       ? (isAbsolute(options.executable) ? options.executable : resolve(options.executable))
-      : join(homedir(), '.local', 'bin', 'claude.exe');
+      : join(homedir(), '.local', 'bin', process.platform === 'win32' ? 'claude.exe' : 'claude');
     (options.versionCheck ?? resolveClaudeExecutable)(executable);
     const usePty = options.usePty ?? (process.platform === 'win32' && /\.(?:cmd|bat)$/i.test(executable));
     const child = new BufferedClaudePty(usePty
@@ -366,7 +378,7 @@ export class ClaudeRunner {
     let startedAt: string | undefined;
     try {
       child.attach();
-      startedAt = (options.processStartedAt ?? windowsProcessStartedAt)(child.pid);
+      startedAt = (options.processStartedAt ?? processStartedAt)(child.pid);
       return new ClaudeRunner(child, { ...options, startedAt });
     } catch (error) {
       const cleanup = new ClaudeRunner(child, {
@@ -442,7 +454,7 @@ export class ClaudeRunner {
     try {
       await this.#killTree('taskkill', ['/PID', String(this.identity.pid), '/T', '/F']);
     } catch {
-      // taskkill is a best-effort fallback; process exit is authoritative.
+      // Process-group termination/taskkill is best effort; observed exit is authoritative.
     }
     return this.waitForExit(this.#killConfirmationMs);
   }

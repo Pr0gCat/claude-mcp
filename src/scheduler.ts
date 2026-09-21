@@ -51,7 +51,7 @@ export class Scheduler {
     if (!Number.isSafeInteger(requestedLimit) || requestedLimit < 1) {
       throw new Error('process limit must be a positive integer');
     }
-    this.#processLimit = Math.min(requestedLimit, 4);
+    this.#processLimit = requestedLimit;
   }
 
   get serverId(): string {

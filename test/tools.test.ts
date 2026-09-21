@@ -95,6 +95,18 @@ afterEach(async () => {
 });
 
 describe('MCP tools', () => {
+  it('returns the final reply/error without requiring raw diagnostic history', async () => {
+    const payload = { type: 'result', subtype: 'success', is_error: true, result: 'API Error: Connection dropped (ECONNRESET)' };
+    const client = await connectedClient(fakeService({ readAgent: vi.fn(() => ({
+      ...readPage,
+      latestResult: { sequence: '9', agentId: 'agent-1', turnId: 'turn-1', type: 'result', payload, raw: JSON.stringify(payload), createdAt: summary.updatedAt },
+    })) }));
+    const response = await client.callTool({ name: 'read_agent', arguments: { agent_id: 'agent-1' } });
+    expect(response.isError).not.toBe(true);
+    expect(structured(response).latest_result).toMatchObject({ turn_id: 'turn-1', payload });
+    expect(structured(response).raw_events).toBeUndefined();
+  });
+
   it('registers exactly the eight public snake_case schemas', async () => {
     const client = await connectedClient(fakeService());
 

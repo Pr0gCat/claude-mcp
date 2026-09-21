@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -7,6 +7,7 @@ export interface Config {
   stateDir: string;
   claudeExecutable?: string;
   stallTimeoutMs: number;
+  processLimit: number;
 }
 
 type Environment = Readonly<Record<string, string | undefined>>;
@@ -25,7 +26,20 @@ $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRul
 Set-Acl -LiteralPath $path -AclObject $acl
 `;
 
+function positiveInteger(env: Environment, name: string, fallback: number): number {
+  const override = env[name];
+  if (override === undefined) return fallback;
+  if (!/^[1-9]\d*$/.test(override.trim()) || !Number.isSafeInteger(Number(override))) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+  return Number(override);
+}
+
 function applyCurrentUserOnlyAcl(directory: string): void {
+  if (process.platform === 'darwin') {
+    chmodSync(directory, 0o700);
+    return;
+  }
   if (process.platform !== 'win32') return;
 
   try {
@@ -56,15 +70,8 @@ export function loadConfig(env: Environment = process.env, startupCwd = process.
     throw new Error('CLAUDE_MCP_CLAUDE_EXECUTABLE must not be empty');
   }
 
-  const stallTimeoutOverride = env.CLAUDE_MCP_STALL_TIMEOUT_MS;
-  let stallTimeoutMs = 300_000;
-  if (stallTimeoutOverride !== undefined) {
-    if (!/^[1-9]\d*$/.test(stallTimeoutOverride.trim())
-      || !Number.isSafeInteger(Number(stallTimeoutOverride))) {
-      throw new Error('CLAUDE_MCP_STALL_TIMEOUT_MS must be a positive integer');
-    }
-    stallTimeoutMs = Number(stallTimeoutOverride);
-  }
+  const stallTimeoutMs = positiveInteger(env, 'CLAUDE_MCP_STALL_TIMEOUT_MS', 300_000);
+  const processLimit = positiveInteger(env, 'CLAUDE_MCP_PROCESS_LIMIT', 4);
 
   const stateDir = resolve(startupCwd, override ?? join(env.USERPROFILE ?? homedir(), '.claude-mcp'));
   mkdirSync(stateDir, { recursive: true });
@@ -73,6 +80,7 @@ export function loadConfig(env: Environment = process.env, startupCwd = process.
     stateDir,
     ...(claudeExecutable !== undefined ? { claudeExecutable } : {}),
     stallTimeoutMs,
+    processLimit,
   };
 }
 

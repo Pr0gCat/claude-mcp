@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 
+import { inspectMacProcessIdentity } from './mac-process.js';
 import { ClaudeResumeError } from './claude/runtime.js';
 import type {
   AgentState,
@@ -90,6 +91,7 @@ export interface AgentReadPage {
   cursor: string;
   hasMore: boolean;
   rawEvents?: ClaudeEvent[];
+  latestResult?: ClaudeEvent;
   rawCursor?: string;
 }
 
@@ -139,7 +141,11 @@ export interface AgentServiceOptions {
   onDiagnostic?: (message: string) => void;
 }
 
-function powershellProcessInspection(identity: ProcessIdentity): RuntimeProcessInspection {
+function runtimeProcessInspection(identity: ProcessIdentity): RuntimeProcessInspection {
+  if (process.platform === 'darwin') {
+    const status = inspectMacProcessIdentity(identity);
+    return status === 'matching' ? 'alive' : status === 'missing' || status === 'reused' ? 'dead' : 'unknown';
+  }
   if (process.platform !== 'win32') return 'unknown';
   const script = [
     '$candidate = Get-Process -Id ([int]$env:CLAUDE_MCP_INSPECT_PID) -ErrorAction SilentlyContinue',
@@ -237,7 +243,7 @@ export class AgentService implements AgentServiceApi {
     }
     this.#ownerHeartbeatStaleMs = ownerHeartbeatStaleMs;
     this.#now = options.now ?? (() => new Date());
-    this.#inspectRuntimeProcess = options.inspectRuntimeProcess ?? powershellProcessInspection;
+    this.#inspectRuntimeProcess = options.inspectRuntimeProcess ?? runtimeProcessInspection;
     this.#onDiagnostic = options.onDiagnostic ?? ((message) => console.error(message));
     this.store.registerServerInstance(this.scheduler.serverId, this.#now().toISOString());
     this.reconcileStartupOwnership();
@@ -413,6 +419,7 @@ export class AgentService implements AgentServiceApi {
       return {
         agent: this.summary(agentId),
         turns: this.store.listTurns(agentId),
+        latestResult: this.store.readLatestResult(agentId),
         events,
         cursor: events.at(-1)?.sequence ?? afterCursor,
         hasMore: page.length > limit,

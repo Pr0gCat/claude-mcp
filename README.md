@@ -22,14 +22,15 @@ Codex / MCP client
 STDIO MCP server ---- SQLite state, mailbox, events, and leases
         |
         v
-Claude Code CLI processes (maximum four at once)
+Claude Code CLI processes (four at once by default, configurable)
 ```
 
 ## Requirements
 
-- **Windows 11.** This project is Windows-only: process lifecycle
-  (`taskkill`, PowerShell ACL/process inspection, ConPTY) is implemented with
-  Windows-specific tooling and is not portable to macOS/Linux.
+- **Windows 11 or macOS.** This local macOS port adds native process identity
+  inspection and POSIX process-group termination. Linux is not supported.
+- **Xcode Command Line Tools on macOS** (`xcode-select --install`) for building
+  the small libproc helper and native npm dependencies.
 - **Node.js 22 or newer.**
 - **Claude Code CLI 2.1.238 or newer**, installed and logged in with a
   **Claude subscription** (Pro/Max/Team login via `claude login` or
@@ -40,6 +41,53 @@ Claude Code CLI processes (maximum four at once)
   (see [Configuration](#configuration)). At startup the server runs
   `claude --version` and refuses to spawn agents against anything older than
   2.1.238.
+
+## Queue scheduling fix (0.1.0-macos.4)
+
+The scheduler skips queued agents whose workspace lock currently conflicts and
+starts the oldest runnable agent instead. A live orphan that retains one
+workspace lock therefore no longer blocks agents targeting other workspaces.
+
+## Result reporting fix (0.1.0-macos.2)
+
+Claude CLI can report `subtype: "success"` together with `is_error: true` and
+`terminal_reason: "api_error"`. Such turns now finish as `failed`.
+`read_agent` includes `latest_result` even when `include_raw` is false:
+`latest_result.payload.result` contains the reply or API error, and `turn_id`
+identifies the turn it belongs to. Context-only acknowledgements are excluded.
+Raw history and its existing pagination remain available with `include_raw`.
+A successful Claude turn does not guarantee that files were modified.
+
+For existing installations, `node scripts/repair-result-status.mjs <state.sqlite>`
+previews legacy false successes. Add `--apply` to back up the database and repair
+inactive agents only; original frames and events are preserved, with a correction
+`turn.failed` event appended. The repair is idempotent.
+
+## macOS port (0.1.0-macos.1)
+
+This is a local modification of Pr0gCat/claude-mcp, not an upstream release.
+On macOS the default Claude executable is `~/.local/bin/claude`. Native pipes
+launch Claude in its own process group. After stdin closes and the grace period
+expires, the server checks the exact PID/start-time identity and sends SIGKILL
+to that group. Processes that deliberately detach into another group can escape
+cleanup; this is not an OS sandbox. A child that exits before escalation can
+also leave independent descendants, so process-tree cleanup remains best effort.
+
+The helper uses macOS libproc creation timestamps with microsecond precision,
+including on restart, instead of guessing start times or comparing only PIDs.
+Uncertain process identity continues to block automatic recovery. State directories
+use owner-only mode 0700. Executable version checks use direct argv on macOS.
+
+```sh
+npm ci
+npm run build
+npm test
+codex mcp add claude_subagents -- node "$PWD/dist/index.js"
+```
+
+The compiled `dist/mac-process-info` is architecture-specific; rebuild on the
+target Mac before packing/installing. Windows instructions below remain applicable
+to Windows. The fake-CLI end-to-end suite now runs on both supported platforms.
 
 ## Quick start
 
@@ -122,6 +170,7 @@ with `codex mcp add`, `codex mcp list`, and the `/mcp` command.
 | `CLAUDE_MCP_STATE_DIR` | Overrides the state directory. Defaults to `%USERPROFILE%\.claude-mcp`. Must not be set to an empty string. |
 | `CLAUDE_MCP_CLAUDE_EXECUTABLE` | Overrides the path to the Claude Code executable. Defaults to `%USERPROFILE%\.local\bin\claude.exe`. Must not be set to an empty string. |
 | `CLAUDE_MCP_STALL_TIMEOUT_MS` | Emits an advisory `agent.stalled` event after this many milliseconds without a Claude JSON frame. Defaults to `300000` (5 minutes) and must be a positive integer. It never kills or interrupts Claude. |
+| `CLAUDE_MCP_PROCESS_LIMIT` | Maximum concurrent Claude CLI processes across servers sharing this state directory. Defaults to `4` and must be a positive integer. |
 
 The state directory is normalized to an absolute path when the MCP server
 starts, including when `CLAUDE_MCP_STATE_DIR` is relative. The generated
@@ -318,8 +367,9 @@ Each live agent owns at most one long-running Claude CLI process. The normal
 stream-json --output-format stream-json --verbose --replay-user-messages
 --safe-mode --strict-mcp-config` and a caller-generated `--session-id` (or
 `--resume` for a reconnect). Windows `.cmd`/`.bat` wrappers use ConPTY instead
-of enabling a command shell. At most four Claude processes run concurrently
-across all agents; idle processes may be evicted and later resumed.
+of enabling a command shell. `CLAUDE_MCP_PROCESS_LIMIT` controls how many Claude
+processes run concurrently across all agents (default `4`); idle processes may
+be evicted and later resumed.
 
 ### Stall detection
 

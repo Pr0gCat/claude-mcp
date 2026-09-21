@@ -429,7 +429,7 @@ describe('ClaudeRunner', () => {
     expect(killTree).not.toHaveBeenCalled();
   });
 
-  it.runIf(process.platform === 'win32')('streams with the fake CLI through Windows stdio pipes', async () => {
+  it.runIf(['win32', 'darwin'].includes(process.platform))('streams with the fake CLI through stdio pipes', async () => {
     const fixture = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
     let resolveReady!: () => void;
     let resolveResult!: (value: unknown) => void;
@@ -475,7 +475,7 @@ describe('ClaudeRunner', () => {
     }
   }, 10_000);
 
-  it.runIf(process.platform === 'win32')('rejects a missing pipe executable without an unhandled process error', async () => {
+  it.runIf(['win32', 'darwin'].includes(process.platform))('rejects a missing pipe executable without an unhandled process error', async () => {
     await expect(ClaudeRunner.spawn({
       executable: join(tmpdir(), 'claude-mcp-missing', 'claude.exe'),
       args: [],
@@ -750,6 +750,24 @@ describe('ClaudeRuntime', () => {
       'future_event',
       'result',
     ]);
+    expect(boundaries).toEqual([agent.id]);
+  });
+
+  it.each([
+    { subtype: 'success', is_error: true, terminal_reason: 'api_error' },
+    { subtype: 'success', is_error: true },
+    { subtype: 'success', terminal_reason: 'api_error' },
+    { subtype: 'error_during_execution', is_error: true },
+  ])('marks API errors failed even when the CLI reports success: %j', async (errorFields) => {
+    const { store, pty, boundaries, runtime } = setup();
+    const { agent, turn, followup } = fixtures(store);
+    await runtime.start(agent, turn, []);
+    await runtime.deliver(agent, followup, true);
+    const frame = { type: 'result', ...errorFields, result: 'API Error: Connection dropped (ECONNRESET)', num_turns: 1 };
+    pty.emitData(JSON.stringify(frame) + '\n');
+    expect(store.getTurn(turn.id)?.status).toBe('failed');
+    expect(store.readEvents({ agentIds: [agent.id], after: '0', limit: 100 }).map(e => e.type)).toContain('turn.failed');
+    expect(store.readLatestResult(agent.id)?.payload).toEqual(frame);
     expect(boundaries).toEqual([agent.id]);
   });
 

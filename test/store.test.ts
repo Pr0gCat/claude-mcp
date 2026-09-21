@@ -127,6 +127,24 @@ describe('AgentStore', () => {
     expect(initial.permissionProfile).toBe('read_only');
   });
 
+  it('claims the first runnable agent when the queue head has a workspace conflict', () => {
+    const store = openStore(temporaryDatabase());
+    stores.push(store);
+    const lockedWorkspace = 'C:\\locked-workspace';
+    const freeWorkspace = 'C:\\free-workspace';
+    const active = store.createAgent({ task: 'Hold lock' }).agent;
+    const blocked = store.createAgent({ task: 'Wait for lock' }).agent;
+    const runnable = store.createAgent({ task: 'Run elsewhere' }).agent;
+
+    store.scheduleAgent(active.id, lockedWorkspace, 'writer');
+    expect(store.claimNextScheduled('lock-owner')).toBeDefined();
+    store.scheduleAgent(blocked.id, lockedWorkspace, 'writer');
+    store.scheduleAgent(runnable.id, freeWorkspace, 'writer');
+
+    expect(store.claimNextScheduled('other-server')?.agent.id).toBe(runnable.id);
+    expect(store.getAgent(blocked.id)?.state).toBe('queued');
+  });
+
   it('persists a created agent event after close and reopen', () => {
     const path = temporaryDatabase();
     const store = openStore(path);

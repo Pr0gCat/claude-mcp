@@ -11,7 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 const distEntrypoint = join(repoRoot, 'dist', 'index.js');
-const fakeClaudeExecutable = fileURLToPath(new URL('./fixtures/fake-claude-cli.cmd', import.meta.url));
+const fakeClaudeExecutable = fileURLToPath(new URL(process.platform === 'win32' ? './fixtures/fake-claude-cli.cmd' : './fixtures/fake-claude-cli.mjs', import.meta.url));
 
 const temporaryDirectories: string[] = [];
 
@@ -60,7 +60,7 @@ async function waitForEventType(
   }
 }
 
-describe.runIf(process.platform === 'win32')('built STDIO MCP server (fake Claude CLI)', () => {
+describe.runIf(['win32', 'darwin'].includes(process.platform))('built STDIO MCP server (fake Claude CLI)', () => {
   beforeAll(() => {
     execFileSync(process.execPath, [
       join(repoRoot, 'node_modules', 'typescript', 'bin', 'tsc'),
@@ -209,7 +209,7 @@ describe.runIf(process.platform === 'win32')('built STDIO MCP server (fake Claud
         // process itself), which does not reliably cascade to the fake Claude
         // CLI's cmd.exe/node.exe descendants. Force the whole tree down so a
         // failed assertion above can never leak a PTY process out of this test.
-        if (serverPid !== null) {
+        if (serverPid !== null && process.platform === 'win32') {
           try {
             execFileSync('taskkill', ['/PID', String(serverPid), '/T', '/F'], { stdio: 'ignore', timeout: 5_000 });
           } catch {
