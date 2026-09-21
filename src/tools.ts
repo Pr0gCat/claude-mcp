@@ -184,8 +184,12 @@ const nonEmpty = z.string().trim().min(1);
 
 const spawnAgentInput = stableObject({
   task: nonEmpty,
-  cwd: nonEmpty.optional(),
-  permission_profile: z.enum(['read_only', 'workspace_write']).default('read_only'),
+  cwd: nonEmpty.describe(
+    'Agent working directory. Concurrent workspace_write agents must use distinct Git worktree paths; agents sharing one cwd are serialized by the workspace lock.',
+  ).optional(),
+  permission_profile: z.enum(['read_only', 'workspace_write']).describe(
+    'Use workspace_write only when file changes are required. Create and pass a distinct Git worktree cwd for each concurrent writer.',
+  ).default('read_only'),
   model: nonEmpty.describe(
     'Claude Code model alias or full model ID. Omit for the local Claude default; use fable for routine implementation, sonnet for complex debugging/review, and opus for the hardest architecture, security, or failed-escalation work.',
   ).optional(),
@@ -213,7 +217,7 @@ const readAgentInput = stableObject({
 
 export function registerAgentTools(server: McpServer, service: AgentServiceApi): void {
   server.registerTool('spawn_agent', {
-    description: 'Create a Claude Code subagent and start its first turn. Model routing: omit model for the local default; fable handles routine implementation, sonnet handles complex coding/debugging/review, and opus is reserved for the hardest architecture, security, or escalation work.',
+    description: 'Create a Claude Code subagent and start its first turn. Concurrent workspace_write agents require distinct Git worktree cwd values; the same cwd permits only one writer and queues conflicting agents. Model routing: omit model for the local default; fable handles routine implementation, sonnet handles complex coding/debugging/review, and opus is reserved for the hardest architecture, security, or escalation work.',
     inputSchema: spawnAgentInput.inputSchema,
   }, (input) => executeInput(spawnAgentInput.validator, input, async (input) => {
     const result = await service.spawnAgent({

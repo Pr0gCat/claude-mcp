@@ -143,7 +143,12 @@ describe('MCP tools', () => {
       required: ['task'],
       properties: {
         task: { type: 'string', minLength: 1 },
-        permission_profile: { type: 'string', default: 'read_only' },
+        cwd: { type: 'string', description: expect.stringContaining('distinct Git worktree') },
+        permission_profile: {
+          type: 'string',
+          default: 'read_only',
+          description: expect.stringContaining('distinct Git worktree'),
+        },
         model: { type: 'string', description: expect.stringContaining('sonnet') },
         effort: {
           type: 'string',
@@ -153,7 +158,7 @@ describe('MCP tools', () => {
       },
     });
     expect(listed.tools.find(({ name }) => name === 'spawn_agent')?.description)
-      .toContain('opus is reserved for the hardest');
+      .toContain('Concurrent workspace_write agents require distinct Git worktree');
     expect(listed.tools.find(({ name }) => name === 'wait_agent')?.inputSchema).toMatchObject({
       required: ['agent_ids'],
       properties: {

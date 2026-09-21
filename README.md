@@ -42,6 +42,12 @@ Claude Code CLI processes (four at once by default, configurable)
   `claude --version` and refuses to spawn agents against anything older than
   2.1.238.
 
+## Worktree guidance (0.1.0-macos.6)
+
+The `spawn_agent` tool metadata tells MCP clients to assign a distinct Git
+worktree `cwd` to each concurrent `workspace_write` agent. Writers sharing one
+working directory remain serialized by the workspace lock.
+
 ## Orphan process containment (0.1.0-macos.5)
 
 On macOS, every spawned Claude process group now has a detached native
